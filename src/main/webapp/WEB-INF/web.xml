@@ -7,7 +7,7 @@
     <display-name>Lucas Web Application</display-name>
     <servlet>
         <servlet-name>zmvc</servlet-name>
-        <servlet-class>com.lucas.spring.init.ZDispatcherServlet</servlet-class>
+        <servlet-class>com.lucas.spring.init.v1.ZDispatcherServlet</servlet-class>
         <!-- 初始化参数，可以配置多个 -->
         <init-param>
             <param-name>contextConfigLocation</param-name>

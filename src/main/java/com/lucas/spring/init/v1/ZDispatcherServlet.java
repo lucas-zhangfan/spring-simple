@@ -1,4 +1,4 @@
-package com.lucas.spring.init;
+package com.lucas.spring.init.v1;
 
 import com.lucas.spring.annotation.ZAutowired;
 import com.lucas.spring.annotation.ZController;
@@ -33,6 +33,7 @@ public class ZDispatcherServlet extends HttpServlet {
     private List<String> classNames = new ArrayList<String>();
 
     private Map<String, Object> ioc = new HashMap<String, Object>();
+
     //保存 url 和 Method 的对应关系
     private Map<String, Method> handlerMapping = new HashMap<String, Method>();
 
@@ -115,57 +116,70 @@ public class ZDispatcherServlet extends HttpServlet {
             return;
         }
         for (Map.Entry<String, Object> entry : ioc.entrySet()) {
+
+            // 主要处理Controller类
             Class<?> clazz = entry.getValue().getClass();
             if (!clazz.isAnnotationPresent(ZController.class)) {
                 continue;
             }
-            //保存写在类上面的@GPRequestMapping("/demo")
+
             String baseUrl = "";
+            // 先盘点类上是否有请求路径
             if (clazz.isAnnotationPresent(ZRequestMapping.class)) {
                 ZRequestMapping requestMapping = clazz.getAnnotation(ZRequestMapping.class);
                 baseUrl = requestMapping.value();
             }
-            //默认获取所有的 public 方法
+
+
+            // 默认获取所有的 public 方法
             for (Method method : clazz.getMethods()) {
+
+                // 再判断方法上的请求路径，没有注解的方法直接跳过
                 if (!method.isAnnotationPresent(ZRequestMapping.class)) {
                     continue;
                 }
-                ZRequestMapping requestMapping = method.getAnnotation(ZRequestMapping.class);//优化
-                // //demo///query
-                String url = ("/" + baseUrl + "/" + requestMapping.value())
-                        .replaceAll("/+", "/");
+
+                ZRequestMapping requestMapping = method.getAnnotation(ZRequestMapping.class);
+                // 先拼接，再把有多个 / 的位置转成只有一个
+                String url = ("/" + baseUrl + "/" + requestMapping.value()).replaceAll("/+", "/");
+
+                // 保存路径和方法
                 handlerMapping.put(url, method);
+
                 System.out.println("Mapped :" + url + "," + method);
             }
         }
     }
 
+    /**
+     * 完成依赖注入
+     */
     private void doAutowired() {
         if (ioc.isEmpty()) {
             return;
         }
+        // 遍历容器中所有bean
         for (Map.Entry<String, Object> entry : ioc.entrySet()) {
-            //Declared 所有的，特定的 字段，包括 private/protected/default
-            //正常来说，普通的 OOP 编程只能拿到 public 的属性
+            // 获取所有的字段 public/private/protected/default 的属性
             Field[] fields = entry.getValue().getClass().getDeclaredFields();
             for (Field field : fields) {
+                // 只对有注解的属性进行注入
                 if (!field.isAnnotationPresent(ZAutowired.class)) {
                     continue;
                 }
                 ZAutowired autowired = field.getAnnotation(ZAutowired.class);
-                //如果用户没有自定义 beanName，默认就根据类型注入
-                //这个地方省去了对类名首字母小写的情况的判断，这个作为课后作业
-                //小伙伴们自己去完善
+
+                // 如果没有指定自定义beanName，默认就根据类型注入, (这里忽略了对类名首字母小写的情况的判断)
                 String beanName = autowired.value().trim();
                 if ("".equals(beanName)) {
-                    //获得接口的类型，作为 key 待会拿这个 key 到 ioc 容器中去取值
+                    // 获得接口的类型，根据这个key到ioc容器中取值
                     beanName = field.getType().getName();
                 }
-                //如果是 public 以外的修饰符，只要加了@Autowired 注解，都要强制赋值
-                //反射中叫做暴力访问， 强吻
+
+                // 如果是 public 以外的修饰符，只要加了注解，都要强制赋值
                 field.setAccessible(true);
                 try {
-                    //用反射机制，动态给字段赋值
+                    // 给字段赋值
                     field.set(entry.getValue(), ioc.get(beanName));
                 } catch (IllegalAccessException e) {
                     e.printStackTrace();
