@@ -17,6 +17,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 /**
@@ -32,6 +33,7 @@ public class ZDispatcherServlet extends HttpServlet {
     //保存扫描的所有的类名
     private List<String> classNames = new ArrayList<String>();
 
+    // IOC容器，为了简化代码，暂时不考虑ConcurrentHashMap
     private Map<String, Object> ioc = new HashMap<String, Object>();
 
     //保存 url 和 Method 的对应关系
@@ -44,7 +46,7 @@ public class ZDispatcherServlet extends HttpServlet {
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
-        //6、调用，运行阶段
+        // 6、初始化完成后，接口收到请求后，调用，运行阶段
         try {
             doDispatch(req, resp);
         } catch (Exception e) {
@@ -54,21 +56,27 @@ public class ZDispatcherServlet extends HttpServlet {
     }
 
     private void doDispatch(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+        // 绝对路径
         String url = req.getRequestURI();
+        // 从请求中获取上下文
         String contextPath = req.getContextPath();
+        // 获取到后面的请求路径
         url = url.replaceAll(contextPath, "").replaceAll("/+", "/");
+        // 未匹配到对应的路径，直接404
         if (!this.handlerMapping.containsKey(url)) {
             resp.getWriter().write("404 Not Found!!");
             return;
         }
+
+        // 反射执行路径所对应的Controller中的方法
         Method method = this.handlerMapping.get(url);
-        //第一个参数：方法所在的实例
-        //第二个参数：调用时所需要的实参
-        Map<String, String[]> params = req.getParameterMap();
-        //投机取巧的方式
+        // 获取到请求携带的参数名以及对应的参数值
+        Map<String, String[]> params  = req.getParameterMap();
+
+        // 这里获取方法所在的类的名字，用于从IOC中拿到对应的类的实例
         String beanName = toLowerFirstCase(method.getDeclaringClass().getSimpleName());
-        method.invoke(ioc.get(beanName), new Object[]{req, resp, params.get("name")[0]});
-        //System.out.println(method);
+        // 这里传入方法所在的类的实例，以及按顺序传入方法所需要的参数
+        method.invoke(ioc.get(beanName), req, resp, params.get("name")[0]);
 
     }
 
@@ -105,7 +113,7 @@ public class ZDispatcherServlet extends HttpServlet {
         // 5、初始化 HandlerMapping
         initHandlerMapping();
 
-        System.out.println("GP Spring framework is init.");
+        System.out.println("Z Spring framework is init.");
     }
 
     /**
@@ -124,7 +132,7 @@ public class ZDispatcherServlet extends HttpServlet {
             }
 
             String baseUrl = "";
-            // 先盘点类上是否有请求路径
+            // 先判断类上是否有请求路径
             if (clazz.isAnnotationPresent(ZRequestMapping.class)) {
                 ZRequestMapping requestMapping = clazz.getAnnotation(ZRequestMapping.class);
                 baseUrl = requestMapping.value();
@@ -141,7 +149,8 @@ public class ZDispatcherServlet extends HttpServlet {
 
                 ZRequestMapping requestMapping = method.getAnnotation(ZRequestMapping.class);
                 // 先拼接，再把有多个 / 的位置转成只有一个
-                String url = ("/" + baseUrl + "/" + requestMapping.value()).replaceAll("/+", "/");
+                String url = ("/" + baseUrl + "/" + requestMapping.value())
+                        .replaceAll("/+", "/");
 
                 // 保存路径和方法
                 handlerMapping.put(url, method);
@@ -160,7 +169,7 @@ public class ZDispatcherServlet extends HttpServlet {
         }
         // 遍历容器中所有bean
         for (Map.Entry<String, Object> entry : ioc.entrySet()) {
-            // 获取所有的字段 public/private/protected/default 的属性
+            // 获取所有的字段 public/private/protected/default 的属性字段
             Field[] fields = entry.getValue().getClass().getDeclaredFields();
             for (Field field : fields) {
                 // 只对有注解的属性进行注入
@@ -211,7 +220,7 @@ public class ZDispatcherServlet extends HttpServlet {
                     ioc.put(beanName, instance);
 
                 } else if (clazz.isAnnotationPresent(ZService.class)) {
-                    // 1、自定义的 beanName
+                    // 1、判断是否有自定义的 beanName
                     ZService service = clazz.getAnnotation(ZService.class);
                     String beanName = service.value();
 
@@ -224,15 +233,17 @@ public class ZDispatcherServlet extends HttpServlet {
                     // 3、以自定义名称，将bean加入到ioc容器
                     ioc.put(beanName, instance);
 
-                    // 4、TODO 根据类型自动赋值,投机取巧的方式
+                    // 4、根据类型自动赋值，将类的接口的全类名也作为key，方便使用类型获取对象（这里是通过类型获取的简化写法）
                     for (Class<?> i : clazz.getInterfaces()) {
                         if (ioc.containsKey(i.getName())) {
+                            // 接口类型重复，不重复保存
                             throw new Exception("The “" + i.getName() + "” is exists!!");
                         }
                         //把接口的类型直接当成 key 了
                         ioc.put(i.getName(), instance);
                     }
                 } else {
+                    // 这里是表示，例如@Component等注解的逻辑，略过
                     continue;
                 }
             }

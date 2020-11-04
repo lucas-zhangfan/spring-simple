@@ -5,6 +5,7 @@
          version="2.5">
 
     <display-name>Lucas Web Application</display-name>
+    <!-- 置servlet，可以配置多个 -->
     <servlet>
         <servlet-name>zmvc</servlet-name>
         <servlet-class>com.lucas.spring.init.v1.ZDispatcherServlet</servlet-class>
@@ -15,6 +16,7 @@
         </init-param>
         <load-on-startup>1</load-on-startup>
     </servlet>
+    <!-- servlet映射，通过servlet-name与上面配置的servlet对应 -->
     <servlet-mapping>
         <servlet-name>zmvc</servlet-name>
         <url-pattern>/*</url-pattern>

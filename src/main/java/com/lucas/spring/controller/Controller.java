@@ -31,6 +31,8 @@ public class Controller {
             e.printStackTrace();
         }
     }
+
+
     @ZRequestMapping("/add")
     public void add(HttpServletRequest req, HttpServletResponse resp,
                     @ZRequestParam("a") Integer a, @ZRequestParam("b") Integer b){
@@ -39,9 +41,5 @@ public class Controller {
         } catch (IOException e) {
             e.printStackTrace();
         }
-    }
-    @ZRequestMapping("/remove")
-    public void remove(HttpServletRequest req,HttpServletResponse resp,
-                       @ZRequestParam("id") Integer id){
     }
 }
