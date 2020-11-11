@@ -1,4 +1,4 @@
-package com.lucas.spring.init.v1;
+package com.lucas.spring.init.v2;
 
 import com.lucas.spring.annotation.*;
 
@@ -15,8 +15,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Logger;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -36,7 +35,8 @@ public class ZDispatcherServlet extends HttpServlet {
     private Map<String, Object> ioc = new HashMap<String, Object>();
 
     //保存 url 和 Method 的对应关系
-    private Map<String, Method> handlerMapping = new HashMap<String, Method>();
+//    private Map<String, Method> handlerMapping = new HashMap<String, Method>();
+    private List<Handler> handlerMapping = new ArrayList<Handler>();
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
@@ -55,69 +55,106 @@ public class ZDispatcherServlet extends HttpServlet {
     }
 
     private void doDispatch(HttpServletRequest req, HttpServletResponse resp) throws Exception {
-        // 获取请求的ip:端口后的全部路径，即上下文和@RequestMapping拼接的全路径
-        String url = req.getRequestURI();
-        // 从请求中获取全局配置的请求上下文，如 /api
-        String contextPath = req.getContextPath();
-        // @RequestMapping中的路径是去除上下文后的路径
-        url = url.replaceAll(contextPath, "").replaceAll("/+", "/");
-        // 未匹配到对应的路径，直接404
-        if (!this.handlerMapping.containsKey(url)) {
-            resp.getWriter().write("404 Not Found!!");
+        // 根据 HttpServletRequest 请求获取缓存的 Handler
+        Handler handler = getHandler(req);
+        // 路径不匹配，返回404
+        if(handler == null){
+            resp.getWriter().write("404 Not Found!");
             return;
         }
+        // 获取方法中的参数类型列表
+        Class<?> [] paramTypes = handler.method.getParameterTypes();
+        // 保存参数值，数组中的参数后面都会根据其类型进行转换，并传入反射执行方法对象的invoke()方法中
+        Object [] paramValues = new Object[paramTypes.length];
 
-        // 反射执行路径所对应的Controller中的方法
-        Method method = this.handlerMapping.get(url);
-        // 获取到请求携带的参数名以及对应的参数值
-        Map<String, String[]> params  = req.getParameterMap();
+        // 获取 HttpServletRequest 中携带的参数，key是String型，value是String型数组
+        // 例如，request中的参数 t1=1&t1=2&t2=3，即 key=t1, value[0]=1,value[1]=2 ; key=t2, value[0]=3
+        Map<String,String[]> params = req.getParameterMap();
 
-        Class<?>[] parameterTypes = method.getParameterTypes();
-
-        Object[] paramValues = new Object[parameterTypes.length];
-
-        for (int i = 0; i < parameterTypes.length; i++) {
-            Class<?> parameterType = parameterTypes[i];
-
-            // 不能用 instanceof，parameterType不是实参，而是形参
-            if(parameterType == HttpServletRequest.class){
-                paramValues[i] = req;
-
-            }else if(parameterType == HttpServletResponse.class){
-                paramValues[i] = resp;
-
-            }else if(parameterType == String.class){
-                ZRequestParam requestParam = parameterType.getAnnotation(ZRequestParam.class);
-                if(params.containsKey(requestParam.value())) {
-                    for (Map.Entry<String,String[]> param : params.entrySet()){
-                        String value = Arrays.toString(param.getValue())
-                                .replaceAll("\\[|\\]","")
-                                .replaceAll("\\s",",");
-                        paramValues[i] = value;
-                    }
-                }
+        // 遍历请求参数
+        for (Map.Entry<String, String[]> param : params.entrySet()) {
+            // 将参数值准成 String
+            String value = Arrays.toString(param.getValue())
+                    // url传过的是String型数组, 将数组外的[]给去掉
+                    .replaceAll("\\[|\\]","")
+                    // 将空白处替换为逗号 ,
+                    .replaceAll("\\s",",");
+            // 如果不包含这个参数名，说明不需要进行转换，例如 HttpServletRequest
+            if(!handler.paramIndexMapping.containsKey(param.getKey())){
+                continue;
             }
+            // 根据请求参数名获取方法中的参数位置索引
+            int index = handler.paramIndexMapping.get(param.getKey());
+            // 转换请求参数类型，并赋值给数组对应元素
+            paramValues[index] = convert(paramTypes[index], value);
         }
 
-        // 这里获取方法所在的类的名字，用于从IOC中拿到对应的类的实例
-        String beanName = toLowerFirstCase(method.getDeclaringClass().getSimpleName());
-        // 执行方法，传入方法对参数，这里是写死的，后续优化
-        method.invoke(ioc.get(beanName), paramValues);
+        // 单独判断 HttpServletRequest 和 HttpServletResponse，赋值给参数数组对应元素
+        if(handler.paramIndexMapping.containsKey(HttpServletRequest.class.getName())) {
+            int reqIndex = handler.paramIndexMapping.get(HttpServletRequest.class.getName());
+            paramValues[reqIndex] = req;
+        }
+        if(handler.paramIndexMapping.containsKey(HttpServletResponse.class.getName())) {
+            int respIndex = handler.paramIndexMapping.get(HttpServletResponse.class.getName());
+            paramValues[respIndex] = resp;
+        }
 
+        // 传入参数数组，执行对应方法
+        Object returnValue = handler.method.invoke(handler.controller, paramValues);
+        // 返回方法返回值，有值则转成 String, 返回页面
+        if(returnValue == null){
+            return;
+        }
+        resp.getWriter().write(returnValue.toString());
     }
-//
-//    //url 传过来的参数都是 String 类型的，HTTP 是基于字符串协议
-//    //只需要把 String 转换为任意类型就好
-//    private Object convert(Class<?> type, String value) {
-//        //如果是 int
-//        if (Integer.class == type) {
-//            return Integer.valueOf(value);
-//        }
-//        //如果还有 double 或者其他类型，继续加 if
-//        //这时候，我们应该想到策略模式了
-//        //在这里暂时不实现，希望小伙伴自己来实现
-//        return value;
-//    }
+
+    /**
+     * 根据请求路径获取对应 Handler
+     * @param req
+     * @return
+     * @throws Exception
+     */
+    private Handler getHandler(HttpServletRequest req) throws Exception {
+        if(handlerMapping.isEmpty()){
+            return null;
+        }
+        // 这里获取的紧跟端口后的完整请求路径
+        String url = req.getRequestURI();
+        // 这里获取的是全局配置的请求前缀，和Controller中路径组成完整请求路径
+        String contextPath = req.getContextPath();
+        // 获取Controller中请求路径
+        url = url.replace(contextPath, "").replaceAll("/+", "/");
+        for (Handler handler : handlerMapping) {
+            try{
+                // 根据请求路径正则匹配
+                Matcher matcher = handler.pattern.matcher(url);
+                // 如果没有匹配上继续下一个匹配
+                if(!matcher.matches()){
+                    continue;
+                }
+                return handler;
+            }catch(Exception e){
+                throw e;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 根据参数类型和参数值进行转换
+     * url 传过来的参数都是 String 类型，HTTP 是基于字符串协议，只需要把 String 转换为任意类型就好
+     * @param type
+     * @param value
+     * @return
+     */
+    private Object convert(Class<?> type, String value) {
+        // 如果是 int
+        if (Integer.class == type) {
+            return Integer.valueOf(value);
+        }
+        // 如果是其他类型，那就继续加判断并准换，这里就不再重复实现，可以考虑采用策略模式
+        return value;
+    }
 
     /**
      * 初始化容器
@@ -157,29 +194,26 @@ public class ZDispatcherServlet extends HttpServlet {
                 continue;
             }
 
-            String baseUrl = "";
+            String url = "";
             // 先判断类上是否有请求路径
             if (clazz.isAnnotationPresent(ZRequestMapping.class)) {
                 ZRequestMapping requestMapping = clazz.getAnnotation(ZRequestMapping.class);
-                baseUrl = requestMapping.value();
+                url = requestMapping.value();
             }
-
 
             // 默认获取所有的 public 方法
             for (Method method : clazz.getMethods()) {
-
                 // 再判断方法上的请求路径，没有注解的方法直接跳过
                 if (!method.isAnnotationPresent(ZRequestMapping.class)) {
                     continue;
                 }
 
                 ZRequestMapping requestMapping = method.getAnnotation(ZRequestMapping.class);
-                // 先拼接，再把有多个 / 的位置转成只有一个
-                String url = ("/" + baseUrl + "/" + requestMapping.value())
-                        .replaceAll("/+", "/");
+                String regex = ("/" + url + requestMapping.value()).replaceAll("/+", "/");
 
-                // 保存路径和方法
-                handlerMapping.put(url, method);
+                Pattern pattern = Pattern.compile(regex);
+                // 保存正则，Controller实例，对应的方法实例
+                handlerMapping.add(new Handler(pattern, entry.getValue(), method));
 
                 System.out.println("Mapped :" + url + "," + method);
             }
@@ -358,7 +392,7 @@ public class ZDispatcherServlet extends HttpServlet {
         // 参数顺序
         protected Map<String, Integer> paramIndexMapping;
 
-        public Handler(Object controller, Method method, Pattern pattern) {
+        public Handler(Pattern pattern, Object controller, Method method) {
             this.controller = controller;
             this.method = method;
             this.pattern = pattern;
@@ -367,11 +401,15 @@ public class ZDispatcherServlet extends HttpServlet {
         }
 
         private void putParamIndexMapping(Method method) {
-            //提取方法中加了注解的参数
+            // 提取方法参数上的注解，方法中参数和每个参数上的多个注解组成的二维数组
             Annotation[] [] pa = method.getParameterAnnotations();
+            // 遍历参数
             for (int i = 0; i < pa.length ; i ++) {
+                // 遍历注解
                 for(Annotation a : pa[i]){
+                    // 判断是否有 @ZRequestParam
                     if(a instanceof ZRequestParam){
+                        // 拿到 @ZRequestParam 中的参数名，并记录参数顺序
                         String paramName = ((ZRequestParam) a).value();
                         if(!"".equals(paramName.trim())){
                             paramIndexMapping.put(paramName, i);
@@ -379,14 +417,19 @@ public class ZDispatcherServlet extends HttpServlet {
                     }
                 }
             }
-            //提取方法中的 request 和 response 参数
+            // 获取方法中参数类型
             Class<?> [] paramsTypes = method.getParameterTypes();
-            for (int i = 0; i < paramsTypes.length ; i ++) {Class<?> type = paramsTypes[i];
-                if(type == HttpServletRequest.class ||
-                        type == HttpServletResponse.class){
+            // 遍历参数类型
+            for (int i = 0; i < paramsTypes.length ; i ++) {
+                Class<?> type = paramsTypes[i];
+
+                // 排除 HttpServletRequest和 HttpServletResponse，直接记录参数和位置
+                if(type == HttpServletRequest.class || type == HttpServletResponse.class){
                     paramIndexMapping.put(type.getName(),i);
                 }
             }
         }
     }
 }
+
+
