@@ -1,3 +1,12 @@
+---
+title: 300行代码手写一个SpringMVC
+date: 2020-11-11 15:50:16
+tags:
+	- java
+	- spring
+categories: java
+---
+
 # 300行代码手写一个SpringMVC
 
 前段时间看了一个视频课，是关于`Spring`源码的，其中就有一个`300`行手写`SpringMVC`的一堂课，我觉得挺棒的，就将大概的内容整理了一下，也就有了这篇文章的诞生；
@@ -21,6 +30,17 @@ SpringMVC主要的实现部分分为三部分，配置、初始化和运行；
 ## 配置阶段
 
 这里默认已经添加了`Spring`的核心依赖和`Tomcat`依赖，`Servlet`是`tomcat`依赖包中的类，`SpringMVC`的核心功能类`DispatchServlet`需要依赖`Servlet`；
+
+如果未添加`Spring`依赖，这里需要手动添加`Servlet`依赖；
+
+```xml
+<dependency>
+    <groupId>javax.servlet</groupId>
+    <artifactId>javax.servlet-api</artifactId>
+    <version>4.0.1</version>
+    <scope>provided</scope>
+</dependency>
+```
 
 ### 配置application.properties文件
 
